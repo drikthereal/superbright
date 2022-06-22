@@ -56,8 +56,21 @@
   <div id="hour" class="mapboxgl-map"></div>
 
   <script type="module">
-    let point = { center: [-0.1653567, 51.4971778, 0], timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }
-    mapboxgl.accessToken = 'pk.eyJ1IjoibWVzemEiLCJhIjoiY2wyYWQ0ZjVzMDRhcTNicnVpbXZxcGRtYyJ9.MBA7E8BXzcehRTbHSr6X5g';
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        console.log({ pos })
+        doIt(pos.coords.latitude, pos.coords.longitude)
+      },
+      (err) => {
+        console.error(err)
+        alert('could not get your location :(')
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 5000,
+        maximumAge: 0
+      }
+    )
 
     let hour = document.getElementById("hour");
 
@@ -67,86 +80,94 @@
     }
     let selectedStyle = styles.day;
 
-    var map = new mapboxgl.Map({
-      style: 'mapbox://styles/mapbox/' + selectedStyle,
-      center: point.center,
-      zoom: 18,
-      pitch: 30,
-      bearing: -15,
-      container: 'map',
-      antialias: true,
-      hash: false,
-    });
 
-    window.tb = new Threebox(
-      map,
-      map.getCanvas().getContext('webgl'),
-      {
-        realSunlight: true
-      }
-    );
+    function doIt(lat, lng) {
+      let point = { center: [lng, lat, 0], timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }
+      mapboxgl.accessToken = 'pk.eyJ1IjoibWVzemEiLCJhIjoiY2wyYWQ0ZjVzMDRhcTNicnVpbXZxcGRtYyJ9.MBA7E8BXzcehRTbHSr6X5g';
 
-    let date = new Date();
-    let time = (date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds());
-    let timeInput = document.getElementById('time');
-    timeInput.value = time;
-    timeInput.oninput = () => {
-      time = +timeInput.value;
-      date.setHours(Math.floor(time / 3600));
-      date.setMinutes(Math.floor(time / 60) % 60);
-      date.setSeconds(time % 60);
-      map.triggerRepaint();
-    };
+
+
+      var map = new mapboxgl.Map({
+        style: 'mapbox://styles/mapbox/' + selectedStyle,
+        center: point.center,
+        zoom: 18,
+        pitch: 30,
+        bearing: -15,
+        container: 'map',
+        antialias: true,
+        hash: false,
+      });
+
+      window.tb = new Threebox(
+        map,
+        map.getCanvas().getContext('webgl'),
+        {
+          realSunlight: true
+        }
+      );
+
+      let date = new Date();
+      let time = (date.getHours() * 3600 + date.getMinutes() * 60 + date.getSeconds());
+      let timeInput = document.getElementById('time');
+      timeInput.value = time;
+      timeInput.oninput = () => {
+        time = +timeInput.value;
+        date.setHours(Math.floor(time / 3600));
+        date.setMinutes(Math.floor(time / 60) % 60);
+        date.setSeconds(time % 60);
+        map.triggerRepaint();
+      };
+
+      map.addControl(new mapboxgl.NavigationControl());
+
+      map.on('style.load', () => {
+        if (map.getLayer('building')) {
+          map.removeLayer('building');
+        }
+        if (map.getSource('composite')) {
+          map.addLayer({
+            'id': '3d-buildings',
+            'source': 'composite',
+            'source-layer': 'building',
+            'type': 'fill-extrusion',
+            'minzoom': 14,
+            'paint': {
+              'fill-extrusion-color': '#ddd',
+              'fill-extrusion-height': ["number", ["get", "height"], 5],
+              'fill-extrusion-base': ["number", ["get", "min_height"], 0],
+              'fill-extrusion-opacity': 1
+            }
+          }, 'road-label');
+        }
+
+        tb.setBuildingShadows({ layerId: 'building-shadows', buildingsLayerId: '3d-buildings', minAltitude: 0.10 });
+      });
+
+      map.on('render', () => {
+        tb.setSunlight(date);
+        let dateTZ = dateToTimezone(date, point.timezone);
+        hour.innerHTML = "Sunlight on date/time: " + dateTZ.toLocaleString();
+        changeStyleWithDaylight(date, point.center);
+      })
+
+      let loaded = false;
+      map.on('idle', () => {
+        if (!loaded) {
+          map.flyTo({
+            center: point.center,
+            zoom: point.zoom,
+            pitch: point.pitch,
+            bearing: point.bearing
+          });
+          loaded = true;
+        }
+      })
+    }
 
     function dateToTimezone(date = new Date(), timezone) {
       let tzTime = date.toLocaleString("en-US", { timeZone: timezone });
       return new Date(tzTime);
     }
-
-    map.addControl(new mapboxgl.NavigationControl());
-
-    map.on('style.load', () => {
-      if (map.getLayer('building')) {
-        map.removeLayer('building');
-      }
-      if (map.getSource('composite')) {
-        map.addLayer({
-          'id': '3d-buildings',
-          'source': 'composite',
-          'source-layer': 'building',
-          'type': 'fill-extrusion',
-          'minzoom': 14,
-          'paint': {
-            'fill-extrusion-color': '#ddd',
-            'fill-extrusion-height': ["number", ["get", "height"], 5],
-            'fill-extrusion-base': ["number", ["get", "min_height"], 0],
-            'fill-extrusion-opacity': 1
-          }
-        }, 'road-label');
-      }
-
-      tb.setBuildingShadows({ layerId: 'building-shadows', buildingsLayerId: '3d-buildings', minAltitude: 0.10 });
-    });
-
-    map.on('render', () => {
-      tb.setSunlight(date);
-      let dateTZ = dateToTimezone(date, point.timezone);
-      hour.innerHTML = "Sunlight on date/time: " + dateTZ.toLocaleString();
-      changeStyleWithDaylight(date, point.center);
-    })
-
-    let loaded = false;
-    map.on('idle', () => {
-      if (!loaded) {
-        map.flyTo({
-          center: point.center,
-          zoom: point.zoom,
-          pitch: point.pitch,
-          bearing: point.bearing
-        });
-        loaded = true;
-      }
-    })
 
     function changeStyleWithDaylight(date, origin) {
       let sunTimes = tb.getSunTimes(date, origin);
@@ -167,7 +188,3 @@
 
   </script>
 </body>
-
-
-
-
